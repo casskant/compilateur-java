@@ -1,0 +1,187 @@
+/* package et imports */
+package fr.usmb.m1isc.compilation.tp;
+import java_cup.runtime.Symbol;
+import java.util.ArrayList;
+
+/* inclusion du code */
+action code {:
+:};
+
+parser code {:
+    // pour le parser (redefinition de la methode reportant les erreurs d'analyse)
+    public void report_error(String message, Object info) {
+        String m = "";
+        if (info instanceof java_cup.runtime.Symbol) {
+            Symbol s = ((Symbol) info);
+            if (s != null && s.left >= 0) {
+                m = "Ligne " + (s.left+1) + ", Colonne " + (s.right+1) + " : ";
+            }
+        }
+        m = m + message;
+        System.err.println("Erreur : " + m);
+    }
+:};
+
+init with {:
+    // initialisation du parser
+:};
+
+/* ── Symboles terminaux ─────────────────────────────────────────────────── */
+terminal PLUS, MOINS, MOINS_UNAIRE, MUL, DIV, MOD;
+terminal NOT, OR, AND;
+terminal PAR_G, PAR_D;
+terminal SEMI, POINT;
+terminal LET, INPUT, OUTPUT;
+terminal IF, THEN, ELSE;
+terminal WHILE, DO;
+terminal EGAL, GT, GTE;
+terminal NIL, ERROR;
+terminal LAMBDA, VIRGULE;
+terminal Integer ENTIER;
+terminal String IDENT;
+
+/* ── Symboles non terminaux ─────────────────────────────────────────────── */
+non terminal Arbre                       program;
+non terminal Arbre                       sequence;
+non terminal Arbre                       expression;
+non terminal Arbre                       expr;
+non terminal java.util.ArrayList<String> params;
+non terminal java.util.ArrayList<Arbre>  args;
+
+/* ── Priorités (du moins prioritaire au plus prioritaire) ───────────────── */
+precedence nonassoc ELSE;
+precedence nonassoc THEN;
+precedence nonassoc OUTPUT;
+precedence right OR;
+precedence right AND;
+precedence right NOT;
+precedence nonassoc EGAL;
+precedence nonassoc GT, GTE;
+precedence left PLUS, MOINS;
+precedence left MUL, DIV, MOD;
+precedence left MOINS_UNAIRE;
+
+/* ── Grammaire ──────────────────────────────────────────────────────────── */
+
+// Un programme est une séquence d'instructions terminée par un point
+program ::=
+    sequence:s POINT {: RESULT = s; :}
+    ;
+
+// Une séquence est une suite d'instructions séparées par des point-virgules
+sequence ::=
+      expression:e1 SEMI sequence:e2 {: RESULT = new ArbreBinaire(";", e1, e2); :}
+    | expression:e                   {: RESULT = e; :}
+    | /* vide */                     {: RESULT = null; :}
+    ;
+
+// Une expression est une affectation, une boucle, un if, ou une expr simple
+expression ::=
+      expr:e
+        {: RESULT = e; :}
+    | LET IDENT:nom EGAL expr:e
+        {: RESULT = new ArbreLet(nom, e); :}
+    | WHILE expr:cond DO expression:e
+        {: RESULT = new ArbreBinaire("WHILE", cond, e); :}
+    | IF expr:cond THEN expression:a1 ELSE expression:a2
+        {: RESULT = new ArbreBinaire("IF", cond, new ArbreBinaire("THEN_ELSE", a1, a2)); :}
+    | error
+    ;
+
+// Expressions arithmétiques, logiques, lambda, appels de fonction
+expr ::=
+    // ── Opérateurs logiques ───────────────────────────────────────────────
+      NOT expr:e
+        {: RESULT = new ArbreUnaire("NOT", e); :}
+    | expr:e1 AND expr:e2
+        {: RESULT = new ArbreBinaire("AND", e1, e2); :}
+    | expr:e1 OR expr:e2
+        {: RESULT = new ArbreBinaire("OR", e1, e2); :}
+
+    // ── Comparaisons ─────────────────────────────────────────────────────
+    | expr:e1 EGAL expr:e2
+        {: RESULT = new ArbreBinaire("=", e1, e2); :}
+    | expr:e1 GT expr:e2
+        {: RESULT = new ArbreBinaire(">", e1, e2); :}
+    | expr:e1 GTE expr:e2
+        {: RESULT = new ArbreBinaire(">=", e1, e2); :}
+
+    // ── Opérateurs arithmétiques ──────────────────────────────────────────
+    | expr:e1 PLUS expr:e2
+        {: RESULT = new ArbreBinaire("+", e1, e2); :}
+    | expr:e1 MOINS expr:e2
+        {: RESULT = new ArbreBinaire("-", e1, e2); :}
+    | expr:e1 MUL expr:e2
+        {: RESULT = new ArbreBinaire("*", e1, e2); :}
+    | expr:e1 DIV expr:e2
+        {: RESULT = new ArbreBinaire("/", e1, e2); :}
+    | expr:e1 MOD expr:e2
+        {: RESULT = new ArbreBinaire("%", e1, e2); :}
+    | MOINS expr:e
+        {: RESULT = new ArbreUnaire("-", e); :}
+        %prec MOINS_UNAIRE
+
+    // ── IF dans expr (nécessaire pour les corps de lambda et if imbriqués) ─
+    | IF expr:cond THEN expr:a1 ELSE expr:a2
+        {: RESULT = new ArbreBinaire("IF", cond, new ArbreBinaire("THEN_ELSE", a1, a2)); :}
+
+    // ── I/O ──────────────────────────────────────────────────────────────
+    | OUTPUT expr:e
+        {: RESULT = new ArbreUnaire("OUTPUT", e); :}
+    | INPUT
+        {: RESULT = new ArbreIdent("INPUT"); :}
+
+    // ── Feuilles ─────────────────────────────────────────────────────────
+    | NIL
+        {: RESULT = new ArbreIdent("NIL"); :}
+    | ENTIER:n
+        {: RESULT = new ArbreEntier(n); :}
+    | IDENT:id
+        {: RESULT = new ArbreIdent(id); :}
+
+    // ── Parenthèses / séquence ────────────────────────────────────────────
+    | PAR_G sequence:e PAR_D
+        {: RESULT = e; :}
+
+    // ── Définition lambda : lambda (a, b) (corps) ─────────────────────────
+    | LAMBDA PAR_G params:p PAR_D PAR_G expr:e PAR_D
+        {: RESULT = new ArbreLambda(p, e); :}
+
+    // ── Appel de fonction avec arguments : pgcd(x, y) ─────────────────────
+    | IDENT:nom PAR_G args:a PAR_D
+        {: RESULT = new ArbreAppel(nom, a); :}
+
+    // ── Appel de fonction sans arguments : f() ────────────────────────────
+    | IDENT:nom PAR_G PAR_D
+        {: RESULT = new ArbreAppel(nom, new java.util.ArrayList<>()); :}
+    ;
+
+/* ── Liste de paramètres formels : a, b, c ──────────────────────────────── */
+params ::=
+      IDENT:id VIRGULE params:suite
+        {:
+            suite.add(0, id);
+            RESULT = suite;
+        :}
+    | IDENT:id
+        {:
+            java.util.ArrayList<String> l = new java.util.ArrayList<>();
+            l.add(id);
+            RESULT = l;
+        :}
+    ;
+
+/* ── Liste d'arguments effectifs : x, y+1, ... ──────────────────────────── */
+args ::=
+      expr:e VIRGULE args:suite
+        {:
+            suite.add(0, e);
+            RESULT = suite;
+        :}
+    | expr:e
+        {:
+            java.util.ArrayList<Arbre> l = new java.util.ArrayList<>();
+            l.add(e);
+            RESULT = l;
+        :}
+    ;

@@ -1,0 +1,9 @@
+let x = input;
+let y = input;
+let pgcd = 
+  lambda (a, b) (
+    if (0 < b) then pgcd(b, a mod b) else a
+  );
+let z = output pgcd(x, y);
+output z
+.
