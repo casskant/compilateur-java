@@ -7,7 +7,7 @@ import java.io.PrintWriter;
 /**
  * Afficheur d'arbre syntaxique (AST) en mode texte.
  *
- * Produit un affichage visuel de l'arbre :
+ * Produit un affichage visuel de l'arbre et l'enregistre dans le dossier :
  *
  *   ;
  *   ├── LET x
